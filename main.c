@@ -1,0 +1,325 @@
+// Wireless sensor network Laboratory WS 16/17
+// Project: Smart farming , Group: 2 
+// Contributors: Sandeep, Iffat, Ilkin
+
+/* Description of the file */
+// This file contains the main process for the mote. 
+// The main process handles the tasks to be done by Gateway after periodic (30s) wakeup. The steps involved are :
+
+/*
+1. Gateway broadcasts "wakeup_beacon" message in the network and changes state from "sleep" to "active" .
+2. Each mote after receiving the "wakeup_beacon" retransmits the message ONCE again and changes state to "active" from "sleep" .
+3. After each motes are in "active state", they send the "dummy_packet" message multiple times (5 times at random interval of 10-50ms). 
+   This is done for network discovery.i.e to find out the RSSI values of all the neighbouring nodes. 
+4. Each mote maintains a table with the node Id and RSSI values of corresponding nodes.
+5. Based on RSSI values, Dijkstra algorithm is used to calculate the shortest path from the node to the gateway. 
+6. Each mote activates the sensors, gets sensor readings, creates a packet and send it to gateway via the calculated path.
+7. If ACK isnot received withing certain time (10ms), gain the message is retransmitted for a maximum of m times.(m = 5)
+8. Even if after max. retransmissions ACK isnot received, another path is calculated and same process is repeated.
+9. If ACK is received by each mote, they change their state to "Idle" in which they don't send their sensor readings but are ready to 
+   work as relay for other motes.
+10. Gateway senses the channel for 5 seconds to see if it is idle or not. If it finds channel idle, it broadcasts "sleep_beacon"
+    in the network and changes its state to "sleep" again. Each mote after receiving the "sleep_beacon", rebroadcasts the message ONCE 
+    goes to sleep and changes state to "sleep".
+11. If gateway doesnot sense the channel during that time, it waits another 5s and senses the channel. It is repeated 3 times.
+12. After 30s, the same cycle is repeated from step 1. 
+
+*/
+
+
+// Contiki-specific includes:
+#include "contiki.h"
+#include "dev/leds.h"			// Use LEDs.
+#include "sys/clock.h"			// Use CLOCK_SECOND.
+#include "cc2420.h"				// For cc2420_set_channel().
+#include "sys/node-id.h"		// Manipulate the node_id.
+#include "net/rime/rime.h"		// Establish connections.
+#include "random.h"
+#include "main.h"
+// Standard C includes:
+#include <stdio.h>			// For printf.
+#include<stdbool.h>
+
+#define UNICAST_RIME_CHANNEL 146
+#define BROADCAST_RIME_CHANNEL 129
+#define my_node_id 1
+//---------------- FUNCTION PROTOTYPES ----------------
+
+// Broadcast connection setup:
+static struct broadcast_conn broadcastConn;
+static const struct broadcast_callbacks broadcast_callbacks = {broadcast_recv};
+
+
+// Unicast connection setup:
+static struct unicast_conn unicastConn;
+static const struct unicast_callbacks unicast_call = {unicast_recv};
+
+// Global variable declaration
+enum node_state mote_state= sleep ;
+_Bool wakeup_beacon_rebroadcasted = FALSE;
+_Bool sleep_beacon_rebroadcasted = FALSE;
+_Bool dummy_packet_broadcasted = FALSE;
+_Bool ack_received = FALSE;
+float RSSI_table[10];
+
+// Defines the behavior of a connection upon receiving data.
+static void
+broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
+{
+	int bytes = 0;
+	struct message received_message;
+	bytes = packetbuf_copyto(&received_message);
+
+
+	leds_on(LEDS_GREEN);
+	 printf("Broadcast message received from %d.%d: '%s' [RSSI %d]\n",
+			 from->u8[0], from->u8[1],
+			(char *)packetbuf_dataptr(),
+			packetbuf_attr(PACKETBUF_ATTR_RSSI));
+	if ((mote_state == sleep) && (received_message.msg_type == wakeup_beacon )) // if mote is in sleep state and wakeup_beacon is received from gateway, it wakes up
+	{
+		mote_state = active ;
+		if(wakeup_beacon_rebroadcasted == FALSE)
+		{
+			wakeup_beacon_rebroadcasted = TRUE;
+			broadcast_send(&broadcastConn);
+
+		}
+	}
+
+	else if ((mote_state == idle) && (received_message.msg_type == sleep_beacon )) // if mote is in idle state and sleep_beacon is received from gateway, it sleeps down
+	{
+		mote_state = sleep ;
+		if(sleep_beacon_rebroadcasted== FALSE)
+		{
+			sleep_beacon_rebroadcasted = TRUE;
+			broadcast_send(&broadcastConn);
+		}
+	}
+
+	else if ((mote_state == active) && (received_message.msg_type == dummy_packet ))
+	{
+		printf("The mote is active and dummy packet is received from other motes. Now fill up the RSSI table\n");
+		RSSI_table[received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
+
+
+	}
+
+
+
+	leds_off(LEDS_GREEN);
+	return;
+}
+
+
+
+
+static void
+unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
+{
+
+	int bytes = 0, i ;
+	struct message received_message;
+	bytes = packetbuf_copyto(&received_message);
+
+	printf("unicast_recv function called\n");
+	leds_on(LEDS_GREEN);
+	printf("Unicast message received from %d.%d: '%s' [RSSI %d]\n",
+	  			 from->u8[0], from->u8[1],
+	  			(char *)packetbuf_dataptr(),
+	  			packetbuf_attr(PACKETBUF_ATTR_RSSI));
+
+
+	if(((mote_state == active) || (mote_state == idle)) && (received_message.msg_type == sensor_value ))
+	{
+       // check the next hop and send to it
+		for ( i=0; ; i++)
+		{
+			if(received_message.path[i]== my_node_id )
+			continue;
+		}
+
+		linkaddr_t next_node = generateLinkAddress(received_message.path[i+1]);
+		unicast_send(&unicastConn, &next_node);
+
+	}
+
+	else if (((mote_state == active) || (mote_state == idle)) && (received_message.msg_type == ack ))
+	{
+
+		if(received_message.destination_node_id == my_node_id ) // Ack received for the sent data
+		{
+			printf("ACK received for the sent sensor value, now go to idle state.");
+			ack_received = TRUE;
+			mote_state = idle;
+
+		}
+
+		else
+		{
+			for (i=0; ;i++)
+			{
+				if(received_message.path[i]== my_node_id )
+					continue;
+			}
+
+			linkaddr_t next_node = generateLinkAddress(received_message.path[i-1]);
+			unicast_send(&unicastConn, &next_node);
+		}
+	}
+
+	leds_off(LEDS_GREEN);
+	return;
+}
+
+
+// Prints the contents of the Rx buffer.
+static void print_buffer_contents(void);
+// Checks if the loaded RIME address is all zeroes.
+static void check_for_invalid_addr(void);
+// Prints the current settings.
+static void print_settings(void);
+
+//--------------------- PROCESS CONTROL BLOCK ---------------------
+PROCESS(main_process, "Main process");
+AUTOSTART_PROCESSES(main_process);
+//------------------------ PROCESS' THREADS ------------------------
+PROCESS_THREAD(main_process, ev, data) {
+	PROCESS_EXITHANDLER( broadcast_close(&broadcastConn); )
+	PROCESS_BEGIN();
+	// Configure your team's channel (11 - 26).
+	cc2420_set_channel(2);
+	// Set and load the node ID to generate a RIME address:
+	node_id_burn(my_node_id);
+	node_id_restore();
+	print_settings();
+	check_for_invalid_addr();
+
+	unicast_open(&unicastConn , UNICAST_RIME_CHANNEL,&unicast_call);
+	broadcast_open(&broadcastConn, BROADCAST_RIME_CHANNEL, &broadcast_callbacks);
+
+
+	// set timers
+	static struct etimer dummy_packet_timer;
+	static struct timer ack_timer;
+
+
+	// set variables
+	struct message dummy_message, sensor_reading_message;
+	int i;
+
+	// If all is OK, we can start the other two processes:
+	while(1)
+	{
+		// Contiki processes cannot start loops that never end.
+		PROCESS_WAIT_EVENT();
+		if((wakeup_beacon_rebroadcasted == TRUE) && (mote_state == active) && (dummy_packet_broadcasted == FALSE) )
+		{
+			// Broadcast the dummy packet for 5 times (random interval)
+			etimer_set(&dummy_packet_timer, CLOCK_SECOND + 0.1*random_rand()/RANDOM_RAND_MAX);
+			for(i=1; i<=4; i++)
+			{
+				PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&dummy_packet_timer));
+
+				printf("Broadcast dummy packet\r\n");
+				dummy_message.msg_type = dummy_packet ;
+				dummy_message.source_node_id = my_node_id;
+
+				packetbuf_copyfrom(&dummy_message,sizeof(dummy_message));
+				broadcast_send(&broadcastConn);
+
+				leds_toggle(LEDS_BLUE);
+				etimer_reset(&dummy_packet_timer);
+			}
+			dummy_packet_broadcasted = TRUE;
+		}
+
+		// Now find the shorted path, get the sensor values and create a message
+		sensor_reading_message.source_node_id = my_node_id;
+		sensor_reading_message.msg_type = sensor_value ;
+		sensor_reading_message.path = calculate_path(RSSI_table);
+		sensor_reading_message.temp_sensor_reading = 0;
+		sensor_reading_message.light_sensor_reading = 0;
+		sensor_reading_message.humidity_sensor_reading = 0;
+
+
+		// Send the message to the next node in the path.
+		leds_on(LEDS_RED);
+		packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
+		linkaddr_t receiver_node = generateLinkAddress(sensor_reading_message.path[1]);
+		unicast_send(&unicastConn, &receiver_node);
+		leds_off(LEDS_RED);
+		timer_set(&ack_timer, CLOCK_SECOND);
+
+		for(i=0 ; i<5 ; i++)
+		{
+			if (timer_expired(&ack_timer))
+					 {
+						 if(ack_received == TRUE)
+						 {
+							 continue;
+						 }
+
+						 else
+						 {
+							 timer_reset(&ack_timer);
+							 packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
+							 unicast_send(&unicastConn, &receiver_node);
+						 }
+					 }
+
+		}
+
+
+
+
+	}
+	PROCESS_END();
+}
+
+/**
+ * Print the received message
+ */
+static void print_buffer_contents(void){
+	char rxBuffer[PACKETBUF_SIZE];
+	int rxBytes = 0;
+	/*
+	 * get the buffered message and message size
+	 */
+	rxBytes = packetbuf_copyto(&rxBuffer);
+	if (rxBytes>0) {
+		printf("%s\r\n\n",rxBuffer);
+	}
+}
+// Checks if the loaded RIME address is all zeroes.
+static void check_for_invalid_addr(void) {
+	// Boolean flag to check invalid address.
+	static int iAmError = 0;
+	// All-zeroes address.
+	static linkaddr_t errAddr;
+	errAddr.u8[0] = 0;
+	errAddr.u8[1] = 0;
+	// Check if this mote got an invalid address.
+	iAmError = linkaddr_cmp(&errAddr, &linkaddr_node_addr);
+	// Turn ON all LEDs if we loaded an invalid address.
+	if(iAmError){
+		printf("\nLoaded an invalid RIME address (%u.%u)! "
+				"Reset the device.\n\n",
+				linkaddr_node_addr.u8[0],
+				linkaddr_node_addr.u8[1]);
+		// Freezes the app here. Reset needed.
+		while (1){
+			leds_on(LEDS_ALL);
+		}
+	}
+}
+// Prints the current settings.
+static void print_settings(void) {
+	printf("\n-----------------------------\n");
+	printf("Node ID = \t%u\n", node_id);
+	printf("RIME addr = \t%u.%u\n",
+			linkaddr_node_addr.u8[0],
+			linkaddr_node_addr.u8[1]);
+	printf("Using radio channel %d\n", cc2420_get_channel());
+	printf("-----------------------------\n");
+}
