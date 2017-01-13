@@ -82,7 +82,7 @@ static void getHumidityValue(uint8_t phidget_input){
 	SensorValue = voltage/4.096;
 	humidity = (int)(SensorValue*0.1906 - 40.2) ;
 	
-	if (lux < 50)
+	if (humidity < 50)
 		message.humidity_sensor_reading==FALSE;
 	else 
 		message.humidity_sensor_reading==TRUE;
