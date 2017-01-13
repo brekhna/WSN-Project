@@ -37,7 +37,7 @@ struct message
 	int destination_node_id;
 	float temp_sensor_reading_int;
 	char temp_sensor_reading_sign;
-	float light_sensor_reading;
-	float humidity_sensor_reading;
+	_Bool light_sensor_reading;
+	_Bool humidity_sensor_reading;
 
 };
