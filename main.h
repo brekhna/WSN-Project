@@ -1,12 +1,18 @@
 
 
-
-
-
-
-
-
-
+// Contiki-specific includes:
+#include "contiki.h"
+#include "dev/leds.h"			// Use LEDs.
+#include "sys/clock.h"			// Use CLOCK_SECOND.
+#include "cc2420.h"				// For cc2420_set_channel().
+#include "sys/node-id.h"		// Manipulate the node_id.
+#include "net/rime/rime.h"		// Establish connections.
+#include "random.h"
+#include "linkaddr.h"
+// Standard C includes:
+#include <stdio.h>			// For printf.
+#include<stdbool.h>
+#include "stdint.h"
 
 
 enum msg_type
@@ -19,7 +25,7 @@ enum msg_type
 };
 
 
-enum mote_state 
+enum node_state
 {
   sleep = 0,
   active = 1,
@@ -31,13 +37,31 @@ enum mote_state
 struct message
 {
 	int msg_id;
-	enum message_type  msg_type;
+	enum  msg_type message_type  ;
 	int path[10];
 	int source_node_id;
 	int destination_node_id;
-	float temp_sensor_reading_int;
-	char temp_sensor_reading_sign;
-	_Bool light_sensor_reading;
-	_Bool humidity_sensor_reading;
+	int next_node_id;
+	float temp_sensor_reading;
+	float light_sensor_reading;
+	float humidity_sensor_reading;
 
 };
+
+
+struct sensor_values
+{
+	float humidity;
+	float temperature;
+	_Bool light;
+
+};
+
+enum node_state mote_state= sleep ;
+_Bool wakeup_beacon_rebroadcasted = 0;
+_Bool sleep_beacon_rebroadcasted = 0;
+_Bool dummy_packet_broadcasted = 0;
+_Bool ack_received = 0;
+float RSSI_table[10];
+float sensor_value_table[10][4];
+
