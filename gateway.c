@@ -50,20 +50,20 @@
 
 // Broadcast connection setup:
 static struct broadcast_conn broadcastConn;
-static const struct broadcast_callbacks broadcast_callbacks = {broadcast_recv};
 
 
 // Unicast connection setup:
 static struct unicast_conn unicastConn;
-static const struct unicast_callbacks unicast_call = {unicast_recv};
+
+static linkaddr_t generateLinkAddress(uint8_t nodeId);
 
 // Global variable declaration
- //enum node_state mote_state= sleep ;
- //_Bool wakeup_beacon_rebroadcasted = FALSE;
- //_Bool sleep_beacon_rebroadcasted = FALSE;
- //_Bool dummy_packet_broadcasted = FALSE;
- //_Bool ack_received = FALSE;
- //float RSSI_table[10];
+enum node_state mote_state= sleep ;
+_Bool wakeup_beacon_rebroadcasted = 0;
+_Bool sleep_beacon_rebroadcasted = 0;
+_Bool dummy_packet_broadcasted = 0;
+_Bool ack_received = 0;
+float RSSI_table[10];
 float sensor_value_table[10][4];
 
 // Defines the behavior of a connection upon receiving data.
@@ -80,6 +80,7 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 	return;
 }
 
+static const struct broadcast_callbacks broadcast_callbacks = {broadcast_recv};
 
 
 
@@ -106,7 +107,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 		ack_message.source_node_id = my_node_id;
 		ack_message.destination_node_id = received_message.path[0];
 		ack_message.msg_type = ack ;
-		ack_message.path = received_message.path ;
+		//ack_message.path = received_message.path ;
 
 		// writing the sensor values in a 2d table
 		sensor_value_table[received_message.source_node_id][0] = 1;
@@ -132,6 +133,8 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	return;
 }
 
+static const struct unicast_callbacks unicast_call = {unicast_recv};
+
 
 // Prints the contents of the Rx buffer.
 static void print_buffer_contents(void);
@@ -142,15 +145,17 @@ static void print_settings(void);
 // check whether sensor table is full or not
 static _Bool check_sensor_table(void) ;
 
+
+
 //--------------------- PROCESS CONTROL BLOCK ---------------------
 PROCESS(gateway_process, "Gateway process");
-AUTOSTART_PROCESSES(gateway_process);
+AUTOSTART_PROCESSES(&gateway_process);
 //------------------------ PROCESS' THREADS ------------------------
 PROCESS_THREAD(gateway_process, ev, data) {
 	PROCESS_EXITHANDLER( broadcast_close(&broadcastConn); )
 	PROCESS_BEGIN();
 	// Configure your team's channel (11 - 26).
-	cc2420_set_channel(2);
+	cc2420_set_channel(13);
 	// Set and load the node ID to generate a RIME address:
 	node_id_burn(my_node_id);
 	node_id_restore();
@@ -168,17 +173,17 @@ PROCESS_THREAD(gateway_process, ev, data) {
 
 	// set variables
 	struct message wakeup_message, sleep_message , dummy_message;
-	int i;
+	uint8_t i;
 	_Bool sensor_table_full;
 
 	// If all is OK, we can start the other two processes:
 	while(1)
 	{
-		etimer_set(&wakeup_timer, CLOCK_SECOND*30);
+		etimer_set(&wakeup_timer, CLOCK_SECOND*10);
 		PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&wakeup_timer));
 
 		mote_state = active;
-
+		printf(" Gateway wakes up .\n");
 		// broadcast the wakeup beacon
 		wakeup_message.source_node_id = my_node_id;
 		wakeup_message.msg_type = wakeup_beacon ;
@@ -187,15 +192,15 @@ PROCESS_THREAD(gateway_process, ev, data) {
 
 
 		// broadcast dummy packet 5 times at random intervals
-		if((mote_state == active) && (dummy_packet_broadcasted == FALSE) )
+		if((mote_state == active) && (dummy_packet_broadcasted == 0) )
 				{
 					// Broadcast the dummy packet for 5 times (random interval)
 					etimer_set(&dummy_packet_timer, CLOCK_SECOND/200 + 0.1*random_rand()/RANDOM_RAND_MAX);
-					for(i=1; i<=4; i++)
+					for(i=0; i<=3; i++)
 					{
 						PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&dummy_packet_timer));
 
-						printf("Broadcast dummy packet\r\n");
+						printf("Broadcast dummy packet i= %d\r\n", &i);
 						dummy_message.msg_type = dummy_packet ;
 						dummy_message.source_node_id = my_node_id;
 
@@ -205,7 +210,9 @@ PROCESS_THREAD(gateway_process, ev, data) {
 						leds_toggle(LEDS_BLUE);
 						etimer_reset(&dummy_packet_timer);
 					}
-					dummy_packet_broadcasted = TRUE;
+						dummy_packet_broadcasted = 1;
+						etimer_stop(&dummy_packet_timer);
+
 				}
 
 
@@ -231,6 +238,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 			packetbuf_copyfrom(&sleep_message,sizeof(sleep_message));
 			broadcast_send(&broadcastConn);
 			mote_state = sleep;
+			dummy_packet_broadcasted = 0;
 
 			etimer_reset(&wakeup_timer);
 	}
@@ -288,7 +296,7 @@ static void print_settings(void) {
 static _Bool check_sensor_table(void)
 {
 	int i, count=0 ;
-	_Bool result= FALSE;
+	_Bool result= 0;
 
 
 	for(i=0; i<=9 ; i++)
@@ -298,10 +306,21 @@ static _Bool check_sensor_table(void)
 	}
 
 	if(count == 9 )
-	result = TRUE;
+	result = 1;
 
 	return result;
 
 
+}
+
+
+// Generate link address from node ID
+static linkaddr_t generateLinkAddress(uint8_t nodeId){
+	linkaddr_t addr;
+
+	addr.u8[0] = nodeId;
+	addr.u8[1] = 0;
+
+	return addr;
 }
 
