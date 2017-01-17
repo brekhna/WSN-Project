@@ -23,7 +23,6 @@
     goes to sleep and changes state to "sleep".
 11. If gateway doesnot sense the channel during that time, it waits another 5s and senses the channel. It is repeated 3 times.
 12. After 30s, the same cycle is repeated from step 1.
-
 */
 
 
@@ -44,7 +43,7 @@
 
 #define UNICAST_RIME_CHANNEL 146
 #define BROADCAST_RIME_CHANNEL 129
-#define my_node_id 0
+#define my_node_id 2
 #define RANDOM_RAND_MAX 10
 //---------------- FUNCTION PROTOTYPES ----------------
 
@@ -71,7 +70,7 @@ static void
 broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 {
 	leds_on(LEDS_GREEN);
-	 printf("Broadcast message received from %d.%d: '%s' [RSSI %d]\n",
+	 printf("Broadcast message received from %d.%d: '%s' [RSSI %d\r\n",
 			 from->u8[0], from->u8[1],
 			(char *)packetbuf_dataptr(),
 			packetbuf_attr(PACKETBUF_ATTR_RSSI));
@@ -94,7 +93,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 
 	printf("unicast_recv function called\n");
 	leds_on(LEDS_GREEN);
-	printf("Unicast message received from %d.%d: '%s' [RSSI %d]\n",
+	printf("Unicast message received from %d.%d: '%s' [RSSI %d]\r\n",
 	  			 from->u8[0], from->u8[1],
 	  			(char *)packetbuf_dataptr(),
 	  			packetbuf_attr(PACKETBUF_ATTR_RSSI));
@@ -104,16 +103,19 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	{
        // check the sender mote and send ACK to it
 
-		ack_message.source_node_id = my_node_id;
-		ack_message.destination_node_id = received_message.path[0];
-		ack_message.msg_type = ack ;
-		//ack_message.path = received_message.path ;
-
 		// writing the sensor values in a 2d table
 		sensor_value_table[received_message.source_node_id][0] = 1;
 		sensor_value_table[received_message.source_node_id][1] = received_message.temp_sensor_reading;
 		sensor_value_table[received_message.source_node_id][2] = received_message.light_sensor_reading;
 		sensor_value_table[received_message.source_node_id][3] = received_message.humidity_sensor_reading;
+
+
+
+		//ack_message.path = received_message.path ;
+		printf("unicast_mes received from node_%d\r\n", ack_message.source_node_id);
+		ack_message.source_node_id = my_node_id;
+		ack_message.destination_node_id = received_message.path[0];
+		ack_message.msg_type = ack ;
 
 		for (i=0; ;i++)
 				{
@@ -156,6 +158,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 	PROCESS_BEGIN();
 	// Configure your team's channel (11 - 26).
 	cc2420_set_channel(13);
+	cc2420_set_txpower(31);  // power must be in the range 0..31
 	// Set and load the node ID to generate a RIME address:
 	node_id_burn(my_node_id);
 	node_id_restore();
@@ -168,27 +171,39 @@ PROCESS_THREAD(gateway_process, ev, data) {
 
 	// set timers
 	static struct etimer wakeup_timer , dummy_packet_timer, sensor_table_check_timer;
-	static struct timer ack_timer;
+	static struct timer ack_timer, wakeup_rept_timer;
 
 
 	// set variables
 	struct message wakeup_message, sleep_message , dummy_message;
-	uint8_t i;
+	static int i;
 	_Bool sensor_table_full;
+	void* data;
 
 	// If all is OK, we can start the other two processes:
 	while(1)
 	{
-		etimer_set(&wakeup_timer, CLOCK_SECOND*10);
+		etimer_set(&wakeup_timer, CLOCK_SECOND*20);
 		PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&wakeup_timer));
 
 		mote_state = active;
-		printf(" Gateway wakes up .\n");
+		printf(" Gateway wakes up .\r\n\n");
 		// broadcast the wakeup beacon
 		wakeup_message.source_node_id = my_node_id;
 		wakeup_message.msg_type = wakeup_beacon ;
 		packetbuf_copyfrom(&wakeup_message,sizeof(wakeup_message));
-		broadcast_send(&broadcastConn);
+
+		timer_set(&wakeup_rept_timer,CLOCK_SECOND/200 + 0.1*random_rand()/RANDOM_RAND_MAX);
+		for(i=0; i<=4; i++)
+		{
+			if(timer_expired(&wakeup_rept_timer))
+			{
+				broadcast_send(&broadcastConn);
+			}
+			timer_restart(&wakeup_rept_timer);
+			printf("wakeup msg is send %d times\r\n", i);
+		}
+
 
 
 		// broadcast dummy packet 5 times at random intervals
@@ -196,11 +211,11 @@ PROCESS_THREAD(gateway_process, ev, data) {
 				{
 					// Broadcast the dummy packet for 5 times (random interval)
 					etimer_set(&dummy_packet_timer, CLOCK_SECOND/200 + 0.1*random_rand()/RANDOM_RAND_MAX);
-					for(i=0; i<=3; i++)
+					for(i=0; i<=4; i++)
 					{
 						PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&dummy_packet_timer));
 
-						printf("Broadcast dummy packet i= %d\r\n", &i);
+						printf("Broadcast dummy packet i= %d\r\n", i);
 						dummy_message.msg_type = dummy_packet ;
 						dummy_message.source_node_id = my_node_id;
 
@@ -218,18 +233,24 @@ PROCESS_THREAD(gateway_process, ev, data) {
 
         // check whether sensor table is full or not. Check 10 times on interval of 500 ms. continue if full in between. continue even if not full till 5s.
 		etimer_set(&sensor_table_check_timer, CLOCK_SECOND/2);
-			for(i=0; i<=9; i++)
+			for(i=0; i<=30; i++)
 			{
 			PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&sensor_table_check_timer));
 			sensor_table_full = check_sensor_table();
 
 			if (sensor_table_full)
-			continue;
+				{
+				//process_post(&gateway_process, 'event', data);
+				continue;
+				}
+
 
 			else
 			etimer_reset(&sensor_table_check_timer);
 
 			}
+
+			//PROCESS_WAIT_EVENT_UNTIL(ev) ;
 
 			// broadcast sleep beacon and go to sleep
 			printf("Broadcast sleep beacon \r\n");
@@ -246,7 +267,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 }
 
 /**
- * Print the received message
+ * Print the received messagelinkaddr_node_addr
  */
 static void print_buffer_contents(void){
 	char rxBuffer[PACKETBUF_SIZE];
@@ -272,7 +293,7 @@ static void check_for_invalid_addr(void) {
 	// Turn ON all LEDs if we loaded an invalid address.
 	if(iAmError){
 		printf("\nLoaded an invalid RIME address (%u.%u)! "
-				"Reset the device.\n\n",
+				"Reset the device.\r\n\n",
 				linkaddr_node_addr.u8[0],
 				linkaddr_node_addr.u8[1]);
 		// Freezes the app here. Reset needed.
@@ -284,12 +305,12 @@ static void check_for_invalid_addr(void) {
 // Prints the current settings.
 static void print_settings(void) {
 	printf("\n-----------------------------\n");
-	printf("Node ID = \t%u\n", node_id);
-	printf("RIME addr = \t%u.%u\n",
+	printf("Node ID = %u\r\n", node_id);
+	printf("RIME addr = %u.%u\r\n",
 			linkaddr_node_addr.u8[0],
 			linkaddr_node_addr.u8[1]);
-	printf("Using radio channel %d\n", cc2420_get_channel());
-	printf("-----------------------------\n");
+	printf("Using radio channel %d\r\n", cc2420_get_channel());
+	printf("-----------------------------\r\n");
 }
 
 
@@ -323,4 +344,3 @@ static linkaddr_t generateLinkAddress(uint8_t nodeId){
 
 	return addr;
 }
-
