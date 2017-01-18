@@ -10,7 +10,7 @@
 1. Gateway broadcasts "wakeup_beacon" message in the network and changes state from "sleep" to "active" .
 2. Each mote after receiving the "wakeup_beacon" retransmits the message ONCE again and changes state to "active" from "sleep" .
 3. After each motes are in "active state", they send the "dummy_packet" message multiple times (5 times at random interval of 10-50ms). 
-   This is done for network discovery.i.e to find out the RSSI values of all the neighbouring nodes. 
+   This is done for networkpacketbuf_attr(PACKETBUF_ATTR_RSSI) discovery.i.e to find out the RSSI values of all the neighbouring nodes.
 4. Each mote maintains a table with the node Id and RSSI values of corresponding nodes.
 5. Based on RSSI values, Dijkstra algorithm is used to calculate the shortest path from the node to the gateway. 
 6. Each mote activates the sensors, gets sensor readings, creates a packet and send it to gateway via the calculated path.
@@ -48,7 +48,7 @@
 
 #define UNICAST_RIME_CHANNEL 146
 #define BROADCAST_RIME_CHANNEL 129
-#define my_node_id 5
+#define my_node_id 3
 #define RANDOM_RAND_MAX 10
 //---------------- FUNCTION PROTOTYPES ----------------
 
@@ -68,7 +68,10 @@ static _Bool wakeup_beacon_rebroadcasted = 0;
 static _Bool sleep_beacon_rebroadcasted = 0;
 static _Bool dummy_packet_broadcasted = 0;
 static _Bool ack_received = 0;
-float RSSI_table[10];
+static float RSSI_table[2][10]= {{0,1,2,3,4,5,6,7,8,9},
+						  {0,0,0,0,0,0,0,0,0,0}};
+static float sorted_RSSI_table[2][10] = {{0,1,2,3,4,5,6,7,8,9},
+		  	  	  	  	  	  	  {0,0,0,0,0,0,0,0,0,0}};
 float sensor_value_table[10][4];
 
 
@@ -77,6 +80,7 @@ static linkaddr_t generateLinkAddress(uint8_t nodeId);
 //--------------------- PROCESS CONTROL BLOCK ---------------------generateLinkAddress
 PROCESS(main_process, "Main process");
 AUTOSTART_PROCESSES(&main_process);
+
 
 // Defines thphidgetse behavior of a connection upon receiving data.
 static void
@@ -95,7 +99,7 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 			packetbuf_attr(PACKETBUF_ATTR_RSSI));
 	 printf("mote state is %d and received message is %d \r\n", mote_state, received_message.message_type );
 
-	if ((mote_state == sleep) && (received_message.message_type == wakeup_beacon )) // if mote is in sleep state and wakeup_beacon is received from gateway, it wakes up
+	if ((received_message.message_type == wakeup_beacon )) // if mote is in sleep state and wakeup_beacon is received from gateway, it wakes up
 	{
 		mote_state = active ;
 
@@ -125,11 +129,11 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 			broadcast_send(&broadcastConn);
 		}
 	}
-
 	else if ((mote_state == active) && (received_message.message_type == dummy_packet ))
 	{
 		printf("The mote is active and dummy packet is received from other motes. Now fill up the RSSI table\r\n");
-		RSSI_table[received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
+		RSSI_table[1][received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
+		process_post(&main_process, 'event',data); // post an event to main_process
 
 
 	}
@@ -160,20 +164,12 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	  			packetbuf_attr(PACKETBUF_ATTR_RSSI));
 
 
-	if(((mote_state == active) || (mote_state == idle)) && (received_message.message_type == sensor_value ) && (received_message.next_node_id == my_node_id))
+	if( (mote_state == active) && (received_message.message_type == sensor_value ) && (received_message.next_node_id == my_node_id))
 	{
-       // check the next hop and send to it
-		/*
-		for ( i=0; ; i++)
-		{
-			if(received_message.path[i]== my_node_id )
-			continue;
-		}*/
 
-		received_message.next_node_id = get_next_node_id();
+		received_message.next_node_id = get_next_node_id( received_message);
 		received_message.path_array_index += 1;
 		received_message.path[received_message.path_array_index] = received_message.next_node_id;
-
 
 
 		packetbuf_copyfrom(&received_message, sizeof(received_message));
@@ -183,14 +179,14 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 
 	}
 
-	else if(((mote_state == active) || (mote_state == idle)) && (received_message.message_type == ack ))
+	else if((mote_state == active)  && (received_message.message_type == ack ))
 	{
 
 		if(received_message.destination_node_id == my_node_id ) // Ack received for the sent data
 		{
-			printf("ACK received for the sent sensor value, now go to idle state.\r\n");
+			printf("ACK received for the sent sensor value\r\n");
 			ack_received = 1;
-			mote_state = idle;
+			//mote_state = idle;
 
 		}
 
@@ -202,6 +198,29 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 				if(received_message.path[i]== my_node_id )
 					continue;
 			}*/
+			 int n=10, c=10 ,d,  swap_index;
+			 float swap_value;
+
+			 for (c = 0 ; c < ( n - 1 ); c++)
+			   {
+			     for (d = 0 ; d < n - c - 1; d++)
+			     {
+			       if (sorted_RSSI_table[1][d] > sorted_RSSI_table[1][d+1]) /* For decreasing order use < */
+			       {
+			         swap_value      = RSSI_table[1][d];
+			         sorted_RSSI_table[1][d]   = sorted_RSSI_table[1][d+1];
+			         sorted_RSSI_table[1][d+1] = swap_value;
+
+			         swap_index      = RSSI_table[0][d];
+			         sorted_RSSI_table[0][d]   = sorted_RSSI_table[0][d+1];
+			         sorted_RSSI_table[0][d+1] = swap_index;
+
+
+			       }
+			     }
+			   }
+		return;
+
 			received_message.path_array_index -= 1;
 			packetbuf_copyfrom(&received_message, sizeof(received_message));
 			linkaddr_t next_node = generateLinkAddress(received_message.path[received_message.path_array_index]);
@@ -226,14 +245,16 @@ struct sensor_readings get_sensors_value(void);
 static float get_temp(void);
 _Bool  getLightValue(float m, float b, uint8_t phidget_input);
 float getHumidityValue(uint8_t phidget_input);
-int get_next_node_id(void);
+int get_next_node_id(struct message sensor_message);
+void sort_RSSI_table(void);
+
 
 
 //------------------------ PROCESS' THREADS ------------------------
 PROCESS_THREAD(main_process, ev, data) {
 	PROCESS_EXITHANDLER( broadcast_close(&broadcastConn); )
 	PROCESS_BEGIN();
-	// Configure your team's channel (11 - 26).
+	// Configure your team's channel (11 -26).
 	cc2420_set_channel(13);
 	cc2420_set_txpower(31);
 	// Set and load the node ID to generate a RIME address:
@@ -297,7 +318,10 @@ PROCESS_THREAD(main_process, ev, data) {
 		sensor_reading_message.light_sensor_reading = sensor_data.light;
 		sensor_reading_message.humidity_sensor_reading = sensor_data.humidity;
 
-		sensor_reading_message.next_node_id = get_next_node_id();
+
+		sort_RSSI_table();  // sort the RSSI table for calculating the path
+
+		sensor_reading_message.next_node_id = get_next_node_id(sensor_reading_message);
 		sensor_reading_message.path_array_index = 1;
 		sensor_reading_message.path[0] = my_node_id;
 		sensor_reading_message.path[sensor_reading_message.path_array_index] = sensor_reading_message.next_node_id;
@@ -309,7 +333,7 @@ PROCESS_THREAD(main_process, ev, data) {
 		linkaddr_t receiver_node = generateLinkAddress(sensor_reading_message.path[1]);
 		unicast_send(&unicastConn, &receiver_node);
 		leds_off(LEDS_RED);
-		timer_set(&ack_timer, CLOCK_SECOND/10 + 0.1*random_rand()/RANDOM_RAND_MAX);
+		timer_set(&ack_timer, CLOCK_SECOND+ 0.1*random_rand()/RANDOM_RAND_MAX);
 
 		for(i=0 ; i<5 ; i++)
 		{
@@ -318,6 +342,7 @@ PROCESS_THREAD(main_process, ev, data) {
 						 if(ack_received == 1)
 						 {
 							 continue;
+
 						 }
 
 						 else
@@ -382,7 +407,7 @@ static void print_settings(void) {
 			linkaddr_node_addr.u8[0],
 			linkaddr_node_addr.u8[1]);
 	printf("Using radio channel %d\n", cc2420_get_channel());
-	printf("-----------------------------\r\n");
+	printf("--------------get_next_node_id---------------\r\n");
 }
 
 
@@ -443,6 +468,7 @@ struct sensor_readings get_sensors_value()
 		tempint= (absraw >> 8) * sign;
 		//sensor_reading.temp_sensor_reading = tempint;
 
+
 	return tempint;
 
 }
@@ -484,7 +510,6 @@ struct sensor_readings get_sensors_value()
 	SensorValue = voltage/4.096;
 	humidity = (SensorValue*0.1906 - 40.2) ;
 
-
 	/*
 	if (humidity < 50)
 		sensor_reading.humidity_sensor_reading==0;
@@ -499,21 +524,51 @@ struct sensor_readings get_sensors_value()
 
 
 
- int get_next_node_id()
+ int get_next_node_id(struct message sensor_message)
  {
 	 int i,next_node;
-	 float RSSI_value = 0;
+	 float RSSI_value = -90;
 
 
-	 for (i=0 ; i<10 ; i++)
-	 {
-		 if((RSSI_table[i] > RSSI_value) && (i!= my_node_id))
-		 {
-			 RSSI_value = RSSI_table[i];
-			 next_node = i ;
-		 }
-	 }
+	 next_node = sorted_RSSI_table[0][0];
+
+	 for(i=0 ; i<= sensor_message.path_array_index; i++)
+	 	 {
+	 		 if(next_node == sensor_message.path[i])
+	 		 {
+	 			next_node = sorted_RSSI_table[0][1];
+	 			break;
+	 		 }
+	 	 }
 
 	 return next_node;
 
+ }
+
+
+
+void sort_RSSI_table()
+ {
+	 int n=10, c=10 ,d,  swap_index;
+	 float swap_value;
+
+	 for (c = 0 ; c < ( n - 1 ); c++)
+	   {
+	     for (d = 0 ; d < n - c - 1; d++)
+	     {
+	       if (sorted_RSSI_table[1][d] > sorted_RSSI_table[1][d+1]) /* For decreasing order use < */
+	       {
+	         swap_value      = RSSI_table[1][d];
+	         sorted_RSSI_table[1][d]   = sorted_RSSI_table[1][d+1];
+	         sorted_RSSI_table[1][d+1] = swap_value;
+
+	         swap_index      = RSSI_table[0][d];
+	         sorted_RSSI_table[0][d]   = sorted_RSSI_table[0][d+1];
+	         sorted_RSSI_table[0][d+1] = swap_index;
+
+
+	       }
+	     }
+	   }
+return;
  }
