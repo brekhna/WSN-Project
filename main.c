@@ -48,7 +48,7 @@
 
 #define UNICAST_RIME_CHANNEL 146
 #define BROADCAST_RIME_CHANNEL 129
-#define my_node_id 3
+#define my_node_id 5
 #define RANDOM_RAND_MAX 10
 //---------------- FUNCTION PROTOTYPES ----------------
 
@@ -68,11 +68,11 @@ static _Bool wakeup_beacon_rebroadcasted = 0;
 static _Bool sleep_beacon_rebroadcasted = 0;
 static _Bool dummy_packet_broadcasted = 0;
 static _Bool ack_received = 0;
-static float RSSI_table[2][10]= {{0,1,2,3,4,5,6,7,8,9},
-						  {0,0,0,0,0,0,0,0,0,0}};
-static float sorted_RSSI_table[2][10] = {{0,1,2,3,4,5,6,7,8,9},
-		  	  	  	  	  	  	  {0,0,0,0,0,0,0,0,0,0}};
-float sensor_value_table[10][4];
+static float RSSI_table[2][6]= {{0,1,2,3,4,5},
+						  {0,0,0,0,0,0}};
+static float sorted_RSSI_table[2][6] = {{0,1,2,3,4,5},
+		  	  	  	  	  	  	  {0,0,0,0,0,0}};
+float sensor_value_table[6][4];
 
 
 static linkaddr_t generateLinkAddress(uint8_t nodeId);
@@ -99,19 +99,18 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 			packetbuf_attr(PACKETBUF_ATTR_RSSI));
 	 printf("mote state is %d and received message is %d \r\n", mote_state, received_message.message_type );
 
-	if ((received_message.message_type == wakeup_beacon )) // if mote is in sleep state and wakeup_beacon is received from gateway, it wakes up
+	if ((received_message.message_type == wakeup_beacon ) && (wakeup_beacon_rebroadcasted == 0)) // if mote is in sleep state and wakeup_beacon is received from gateway, it wakes up
 	{
 		mote_state = active ;
 
 		process_post(&main_process, 'event',data); // post an event to main_process
-
-
 
 		printf("mote wakes up \n");
 		if(wakeup_beacon_rebroadcasted == 0)
 		{
 			printf(" wakeup_beacon rebroadcasted \n");
 			wakeup_beacon_rebroadcasted = 1;
+			sleep_beacon_rebroadcasted = 0;
 			packetbuf_copyfrom(&received_message, sizeof(received_message));
 			broadcast_send(&broadcastConn);
 
@@ -124,7 +123,9 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 		if(sleep_beacon_rebroadcasted== 0)
 		{
 			printf("sleep beacon rebroadcasted and mote goes to sleep \r\n");
+			process_post(&main_process, 'sleep_event',data); // post an event to main_process
 			sleep_beacon_rebroadcasted = 1;
+			wakeup_beacon_rebroadcasted = 0;
 			packetbuf_copyfrom(&received_message, sizeof(received_message));
 			broadcast_send(&broadcastConn);
 		}
@@ -133,7 +134,8 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 	{
 		printf("The mote is active and dummy packet is received from other motes. Now fill up the RSSI table\r\n");
 		RSSI_table[1][received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
-		process_post(&main_process, 'event',data); // post an event to main_process
+		RSSI_table[1][my_node_id] = -91;
+		//process_post(&main_process, 'event',data); // post an event to main_process
 
 
 	}
@@ -155,6 +157,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	int bytes = 0, i ;
 	struct message received_message;
 	bytes = packetbuf_copyto(&received_message);
+	void* data ;
 
 	printf("unicast_recv function called\r\n");
 	leds_on(LEDS_GREEN);
@@ -187,6 +190,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 			printf("ACK received for the sent sensor value\r\n");
 			ack_received = 1;
 			//mote_state = idle;
+			process_post(&main_process, 'ack_event',data); // post an event to main_process
 
 		}
 
@@ -198,28 +202,6 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 				if(received_message.path[i]== my_node_id )
 					continue;
 			}*/
-			 int n=10, c=10 ,d,  swap_index;
-			 float swap_value;
-
-			 for (c = 0 ; c < ( n - 1 ); c++)
-			   {
-			     for (d = 0 ; d < n - c - 1; d++)
-			     {
-			       if (sorted_RSSI_table[1][d] > sorted_RSSI_table[1][d+1]) /* For decreasing order use < */
-			       {
-			         swap_value      = RSSI_table[1][d];
-			         sorted_RSSI_table[1][d]   = sorted_RSSI_table[1][d+1];
-			         sorted_RSSI_table[1][d+1] = swap_value;
-
-			         swap_index      = RSSI_table[0][d];
-			         sorted_RSSI_table[0][d]   = sorted_RSSI_table[0][d+1];
-			         sorted_RSSI_table[0][d+1] = swap_index;
-
-
-			       }
-			     }
-			   }
-		return;
 
 			received_message.path_array_index -= 1;
 			packetbuf_copyfrom(&received_message, sizeof(received_message));
@@ -290,7 +272,7 @@ PROCESS_THREAD(main_process, ev, data) {
 		{
 			// Broadcast the dummy packet for 5 times (random interval)
 			etimer_set(&dummy_packet_timer, CLOCK_SECOND/200 + 0.1*random_rand()/RANDOM_RAND_MAX);
-			for(i=0; i<=4; i++)
+			for(i=0; i<=1; i++)
 			{
 				PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&dummy_packet_timer));
 
@@ -307,9 +289,11 @@ PROCESS_THREAD(main_process, ev, data) {
 			dummy_packet_broadcasted = 1;
 		}
 
+
+
 		// Now find the shortest path, get the sensor values and create a message
 		sensor_reading_message.source_node_id = my_node_id;
-		sensor_reading_message.destination_node_id = 2;
+		sensor_reading_message.destination_node_id = 0;
 		sensor_reading_message.message_type = sensor_value ;
 
 		// get sensor values from sensors
@@ -327,7 +311,7 @@ PROCESS_THREAD(main_process, ev, data) {
 		sensor_reading_message.path[sensor_reading_message.path_array_index] = sensor_reading_message.next_node_id;
 
 		// Send the message to the next node in the path.
-		printf("sending sensor values to other motes \r\n");
+		printf("sending sensor values to mote %d \r\n",sensor_reading_message.path[1] );
 		leds_on(LEDS_RED);
 		packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
 		linkaddr_t receiver_node = generateLinkAddress(sensor_reading_message.path[1]);
@@ -349,6 +333,7 @@ PROCESS_THREAD(main_process, ev, data) {
 						 {
 							 timer_reset(&ack_timer);
 							 packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
+							 printf("resending packet \r\n") ;
 							 unicast_send(&unicastConn, &receiver_node);
 						 }
 					 }
@@ -357,7 +342,7 @@ PROCESS_THREAD(main_process, ev, data) {
 
      // what to do if ACK is not received even after 5 attempts.
 
-
+		PROCESS_WAIT_EVENT_UNTIL(ev);
 
 	}
 	PROCESS_END();
@@ -526,18 +511,19 @@ struct sensor_readings get_sensors_value()
 
  int get_next_node_id(struct message sensor_message)
  {
-	 int i,next_node;
-	 float RSSI_value = -90;
+	static int i,next_node,j=1;
+	 //float RSSI_value = -90;
 
 
 	 next_node = sorted_RSSI_table[0][0];
 
 	 for(i=0 ; i<= sensor_message.path_array_index; i++)
 	 	 {
-	 		 if(next_node == sensor_message.path[i])
+	 		 if((next_node == sensor_message.path[i])  || (next_node == my_node_id))
 	 		 {
-	 			next_node = sorted_RSSI_table[0][1];
-	 			break;
+	 			next_node = sorted_RSSI_table[0][j++];
+
+	 			printf("the next node id will be %d , j=%d , \r\n" , next_node,j);
 	 		 }
 	 	 }
 
@@ -549,8 +535,8 @@ struct sensor_readings get_sensors_value()
 
 void sort_RSSI_table()
  {
-	 int n=10, c=10 ,d,  swap_index;
-	 float swap_value;
+	 static int n=10, c=10 ,d,  swap_index;
+	 static float swap_value;
 
 	 for (c = 0 ; c < ( n - 1 ); c++)
 	   {
