@@ -47,7 +47,7 @@
 #include "stdint.h"
 
 #define UNICAST_RIME_CHANNEL 146
-#define BROADCAST_RIME_CHANNEL 129
+#define BROADCAST_RIME_CHANNEL 130
 #define my_node_id 5
 #define RANDOM_RAND_MAX 10
 //---------------- FUNCTION PROTOTYPES ----------------
@@ -62,15 +62,16 @@ static struct unicast_conn unicastConn;
 
 
 // Global variable declaration
+struct message received_message,dummy_message, sensor_reading_message;
 
-static enum node_state mote_state= sleep ;
-static _Bool wakeup_beacon_rebroadcasted = 0;
-static _Bool sleep_beacon_rebroadcasted = 0;
-static _Bool dummy_packet_broadcasted = 0;
-static _Bool ack_received = 0;
-static float RSSI_table[2][6]= {{0,1,2,3,4,5},
+ enum node_state mote_state= sleep ;
+_Bool wakeup_beacon_rebroadcasted = 0;
+ _Bool sleep_beacon_rebroadcasted = 0;
+ _Bool dummy_packet_broadcasted = 0;
+ _Bool ack_received = 0;
+ float RSSI_table[2][6]= {{0,1,2,3,4,5},
 						  {0,0,0,0,0,0}};
-static float sorted_RSSI_table[2][6] = {{0,1,2,3,4,5},
+float sorted_RSSI_table[2][6] = {{0,1,2,3,4,5},
 		  	  	  	  	  	  	  {0,0,0,0,0,0}};
 float sensor_value_table[6][4];
 
@@ -87,7 +88,7 @@ static void
 broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 {
 	int bytes = 0;
-	struct message received_message;
+
 	bytes = packetbuf_copyto(&received_message);
 	void* data ;
 
@@ -97,50 +98,18 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 			 from->u8[0], from->u8[1],
 			(char *)packetbuf_dataptr(),
 			packetbuf_attr(PACKETBUF_ATTR_RSSI));
-	 printf("mote state is %d and received message is %d \r\n", mote_state, received_message.message_type );
+	 printf("the received message type is %d \r\n",received_message.message_type);
 
-	if ((received_message.message_type == wakeup_beacon ) && (wakeup_beacon_rebroadcasted == 0)) // if mote is in sleep state and wakeup_beacon is received from gateway, it wakes up
-	{
-		mote_state = active ;
 
-		process_post(&main_process, 'event',data); // post an event to main_process
-
-		printf("mote wakes up \n");
-		if(wakeup_beacon_rebroadcasted == 0)
-		{
-			printf(" wakeup_beacon rebroadcasted \n");
-			wakeup_beacon_rebroadcasted = 1;
-			sleep_beacon_rebroadcasted = 0;
-			packetbuf_copyfrom(&received_message, sizeof(received_message));
-			broadcast_send(&broadcastConn);
-
-		}
-	}
-
-	else if ((received_message.message_type == sleep_beacon )) // if mote is in idle state and sleep_beacon is received from gateway, it sleeps down
-	{
-		mote_state = sleep ;
-		if(sleep_beacon_rebroadcasted== 0)
-		{
-			printf("sleep beacon rebroadcasted and mote goes to sleep \r\n");
-			process_post(&main_process, 'sleep_event',data); // post an event to main_process
-			sleep_beacon_rebroadcasted = 1;
-			wakeup_beacon_rebroadcasted = 0;
-			packetbuf_copyfrom(&received_message, sizeof(received_message));
-			broadcast_send(&broadcastConn);
-		}
-	}
-	else if ((mote_state == active) && (received_message.message_type == dummy_packet ))
+	if ((received_message.message_type == dummy_packet ))
 	{
 		printf("The mote is active and dummy packet is received from other motes. Now fill up the RSSI table\r\n");
 		RSSI_table[1][received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
 		RSSI_table[1][my_node_id] = -91;
-		//process_post(&main_process, 'event',data); // post an event to main_process
+		process_post(&main_process, 'event',data); // post an event to main_process
 
 
 	}
-
-
 
 	leds_off(LEDS_GREEN);
 	return;
@@ -155,7 +124,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 {
 
 	int bytes = 0, i ;
-	struct message received_message;
+	//struct message received_message;
 	bytes = packetbuf_copyto(&received_message);
 	void* data ;
 
@@ -165,9 +134,9 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	  			 from->u8[0], from->u8[1],
 	  			(char *)packetbuf_dataptr(),
 	  			packetbuf_attr(PACKETBUF_ATTR_RSSI));
+	printf("thhe received messageid iis %d \r\n",received_message.message_type);
 
-
-	if( (mote_state == active) && (received_message.message_type == sensor_value ) && (received_message.next_node_id == my_node_id))
+	if((received_message.message_type == sensor_value ) && (received_message.next_node_id == my_node_id))
 	{
 
 		received_message.next_node_id = get_next_node_id( received_message);
@@ -175,14 +144,15 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 		received_message.path[received_message.path_array_index] = received_message.next_node_id;
 
 
-		packetbuf_copyfrom(&received_message, sizeof(received_message));
+
 		linkaddr_t next_node = generateLinkAddress(received_message.next_node_id);
+		packetbuf_copyfrom(&received_message, sizeof(received_message));
 		printf("message sent to  mote %d in the path.\r\n", received_message.next_node_id);
 		unicast_send(&unicastConn, &next_node);
 
 	}
 
-	else if((mote_state == active)  && (received_message.message_type == ack ))
+	else if((received_message.message_type == ack ))
 	{
 
 		if(received_message.destination_node_id == my_node_id ) // Ack received for the sent data
@@ -220,7 +190,7 @@ static const struct unicast_callbacks unicast_call = {unicast_recv};
 static void print_buffer_contents(void);
 // Checks if the loaded RIME address is all zeroes.
 static void check_for_invalid_addr(void);
-// Prints the current settings.
+// Prints the current setthhe received messageid iis 1 tings.
 static void print_settings(void);
 
 struct sensor_readings get_sensors_value(void);
@@ -255,7 +225,7 @@ PROCESS_THREAD(main_process, ev, data) {
 
 
 	// set variables
-	struct message dummy_message, sensor_reading_message;
+	//struct message dummy_message, sensor_reading_message;
 	struct sensor_readings sensor_data;
 	static int i;
 
@@ -268,7 +238,7 @@ PROCESS_THREAD(main_process, ev, data) {
 		PROCESS_WAIT_EVENT_UNTIL(ev);
 
 		printf(" goes inside IF statement \r\n");
-		if((wakeup_beacon_rebroadcasted == 1) && (mote_state == active) && (dummy_packet_broadcasted == 0) )
+		if( (dummy_packet_broadcasted == 0) )
 		{
 			// Broadcast the dummy packet for 5 times (random interval)
 			etimer_set(&dummy_packet_timer, CLOCK_SECOND/200 + 0.1*random_rand()/RANDOM_RAND_MAX);
@@ -286,7 +256,7 @@ PROCESS_THREAD(main_process, ev, data) {
 				leds_toggle(LEDS_BLUE);
 				etimer_reset(&dummy_packet_timer);
 			}
-			dummy_packet_broadcasted = 1;
+			//dummy_packet_broadcasted = 1;
 		}
 
 
@@ -317,7 +287,7 @@ PROCESS_THREAD(main_process, ev, data) {
 		linkaddr_t receiver_node = generateLinkAddress(sensor_reading_message.path[1]);
 		unicast_send(&unicastConn, &receiver_node);
 		leds_off(LEDS_RED);
-		timer_set(&ack_timer, CLOCK_SECOND+ 0.1*random_rand()/RANDOM_RAND_MAX);
+		timer_set(&ack_timer, 2*CLOCK_SECOND+ 0.1*random_rand()/RANDOM_RAND_MAX);
 
 		for(i=0 ; i<5 ; i++)
 		{
@@ -325,18 +295,22 @@ PROCESS_THREAD(main_process, ev, data) {
 					 {
 						 if(ack_received == 1)
 						 {
+							 printf("ack received\r\n");
+
 							 continue;
 
 						 }
 
 						 else
 						 {
-							 timer_reset(&ack_timer);
+
 							 packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
 							 printf("resending packet \r\n") ;
 							 unicast_send(&unicastConn, &receiver_node);
 						 }
+
 					 }
+			timer_reset(&ack_timer);
 
 		}
 
@@ -511,7 +485,8 @@ struct sensor_readings get_sensors_value()
 
  int get_next_node_id(struct message sensor_message)
  {
-	static int i,next_node,j=1;
+	static int i,next_node;
+	static int j=1;
 	 //float RSSI_value = -90;
 
 
@@ -523,7 +498,7 @@ struct sensor_readings get_sensors_value()
 	 		 {
 	 			next_node = sorted_RSSI_table[0][j++];
 
-	 			printf("the next node id will be %d , j=%d , \r\n" , next_node,j);
+	 			printf("the next node id will be %d , i=%d , \r\n" , next_node,i);
 	 		 }
 	 	 }
 
