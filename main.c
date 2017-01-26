@@ -34,6 +34,7 @@
 #include "cc2420.h"				// For cc2420_set_channel().
 #include "sys/node-id.h"		// Manipulate the node_id.
 #include "net/rime/rime.h"		// Establish connections.
+#include "net/rime/unicast.h"
 #include "random.h"
 #include "main.h"
 #include "linkaddr.h"
@@ -46,11 +47,11 @@
 #include<stdbool.h>
 #include "stdint.h"
 
-#define UNICAST_RIME_CHANNEL 146
+#define UNICAST_RIME_CHANNEL 150
 #define BROADCAST_RIME_CHANNEL 130
-#define my_node_id 5
+#define my_node_id 6
 #define RANDOM_RAND_MAX 10
-//---------------- FUNCTION PROTOTYPES ----------------
+//---------------- FUNCTION P1.ROTOTYPES ----------------
 
 // Broadcast connection setup:
 static struct broadcast_conn broadcastConn;
@@ -69,11 +70,14 @@ _Bool wakeup_beacon_rebroadcasted = 0;
  _Bool sleep_beacon_rebroadcasted = 0;
  _Bool dummy_packet_broadcasted = 0;
  _Bool ack_received = 0;
+ _Bool path_found = 0;
  float RSSI_table[2][6]= {{0,1,2,3,4,5},
 						  {0,0,0,0,0,0}};
 float sorted_RSSI_table[2][6] = {{0,1,2,3,4,5},
 		  	  	  	  	  	  	  {0,0,0,0,0,0}};
 float sensor_value_table[6][4];
+int path_array[6]= {0,0,0,0,0,0};
+int path_index;
 
 
 static linkaddr_t generateLinkAddress(uint8_t nodeId);
@@ -83,11 +87,12 @@ PROCESS(main_process, "Main process");
 AUTOSTART_PROCESSES(&main_process);
 
 
-// Defines thphidgetse behavior of a connection upon receiving data.
+// Defines thphidgetse behavreceived_messageior of a connection upon receiving data.
 static void
 broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 {
 	int bytes = 0;
+	static int i ;
 
 	bytes = packetbuf_copyto(&received_message);
 	void* data ;
@@ -104,10 +109,26 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 	if ((received_message.message_type == dummy_packet ))
 	{
 		printf("The mote is active and dummy packet is received from other motes. Now fill up the RSSI table\r\n");
-		RSSI_table[1][received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
-		RSSI_table[1][my_node_id] = -91;
-		process_post(&main_process, 'event',data); // post an event to main_process
+		//RSSI_table[1][received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
+		//RSSI_table[1][my_node_id] = -91;
 
+		if((packetbuf_attr(PACKETBUF_ATTR_RSSI) > -70) && (path_found == 0))
+		{
+			received_message.path[received_message.path_array_index] = my_node_id;
+			path_found = 1;
+			path_index = received_message.path_array_index;
+			received_message.path_array_index +=1;
+			for(i=0; i<6 ; i++)
+			{
+				path_array[i] = received_message.path[i] ;
+				printf("path array is %d and i=%d and path array index is %d\r\n", path_array[i],i,path_index ) ;
+			}
+			printf(" Resending dummy packet to other motes for network and path discovery \r\n");
+			packetbuf_copyfrom(&received_message,sizeof(dummy_message));
+			broadcast_send(&broadcastConn);
+			process_post(&main_process, 'event',data); // post an event to main_process
+
+		}
 
 	}
 
@@ -126,6 +147,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	int bytes = 0, i ;
 	//struct message received_message;
 	bytes = packetbuf_copyto(&received_message);
+
 	void* data ;
 
 	printf("unicast_recv function called\r\n");
@@ -134,14 +156,14 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	  			 from->u8[0], from->u8[1],
 	  			(char *)packetbuf_dataptr(),
 	  			packetbuf_attr(PACKETBUF_ATTR_RSSI));
-	printf("thhe received messageid iis %d \r\n",received_message.message_type);
+	printf("the received message type  is %d \r\n",received_message.message_type);
 
 	if((received_message.message_type == sensor_value ) && (received_message.next_node_id == my_node_id))
 	{
 
-		received_message.next_node_id = get_next_node_id( received_message);
-		received_message.path_array_index += 1;
-		received_message.path[received_message.path_array_index] = received_message.next_node_id;
+		received_message.next_node_id = received_message.path[received_message.path_array_index -1 ];
+		received_message.path_array_index -= 1;
+		//received_message.path[received_message.path_array_index] = received_message.next_node_id;
 
 
 
@@ -173,7 +195,10 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 					continue;
 			}*/
 
-			received_message.path_array_index -= 1;
+			received_message.path_array_index += 1;
+
+
+
 			packetbuf_copyfrom(&received_message, sizeof(received_message));
 			linkaddr_t next_node = generateLinkAddress(received_message.path[received_message.path_array_index]);
 			unicast_send(&unicastConn, &next_node);
@@ -190,7 +215,7 @@ static const struct unicast_callbacks unicast_call = {unicast_recv};
 static void print_buffer_contents(void);
 // Checks if the loaded RIME address is all zeroes.
 static void check_for_invalid_addr(void);
-// Prints the current setthhe received messageid iis 1 tings.
+// Prints the current setthhe re2 ceived messageid iis 1 tings.
 static void print_settings(void);
 
 struct sensor_readings get_sensors_value(void);
@@ -199,6 +224,7 @@ _Bool  getLightValue(float m, float b, uint8_t phidget_input);
 float getHumidityValue(uint8_t phidget_input);
 int get_next_node_id(struct message sensor_message);
 void sort_RSSI_table(void);
+void delay (float seconds);
 
 
 
@@ -215,13 +241,13 @@ PROCESS_THREAD(main_process, ev, data) {
 	print_settings();
 	check_for_invalid_addr();
 
-	unicast_open(&unicastConn , UNICAST_RIME_CHANNEL,&unicast_call);
+	unicast_open(&unicastConn , UNICAST_RIME_CHANNEL, &unicast_call);
 	broadcast_open(&broadcastConn, BROADCAST_RIME_CHANNEL, &broadcast_callbacks);
 
 
 	// set timers
-	static struct etimer dummy_packet_timer;
-	static struct timer ack_timer;
+	static struct etimer dummy_packet_timer, ack_timer, wait_timer;
+
 
 
 	// set variables
@@ -237,27 +263,6 @@ PROCESS_THREAD(main_process, ev, data) {
 
 		PROCESS_WAIT_EVENT_UNTIL(ev);
 
-		printf(" goes inside IF statement \r\n");
-		if( (dummy_packet_broadcasted == 0) )
-		{
-			// Broadcast the dummy packet for 5 times (random interval)
-			etimer_set(&dummy_packet_timer, CLOCK_SECOND/200 + 0.1*random_rand()/RANDOM_RAND_MAX);
-			for(i=0; i<=1; i++)
-			{
-				PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&dummy_packet_timer));
-
-				printf("Broadcast dummy packet and i=%d\r\n",i);
-				dummy_message.message_type = dummy_packet ;
-				dummy_message.source_node_id = my_node_id;
-
-				packetbuf_copyfrom(&dummy_message,sizeof(dummy_message));
-				broadcast_send(&broadcastConn);
-
-				leds_toggle(LEDS_BLUE);
-				etimer_reset(&dummy_packet_timer);
-			}
-			//dummy_packet_broadcasted = 1;
-		}
 
 
 
@@ -273,53 +278,55 @@ PROCESS_THREAD(main_process, ev, data) {
 		sensor_reading_message.humidity_sensor_reading = sensor_data.humidity;
 
 
-		sort_RSSI_table();  // sort the RSSI table for calculating the path
+		//sort_RSSI_table();  // sort the RSSI table for calculating the path
 
-		sensor_reading_message.next_node_id = get_next_node_id(sensor_reading_message);
-		sensor_reading_message.path_array_index = 1;
-		sensor_reading_message.path[0] = my_node_id;
-		sensor_reading_message.path[sensor_reading_message.path_array_index] = sensor_reading_message.next_node_id;
+		sensor_reading_message.next_node_id = path_array[path_index -1 ];
+		sensor_reading_message.path_array_index = path_index -1;
+		//sensor_reading_message.path[0] = my_node_id;
+		//sensor_reading_message.path[sensor_reading_message.path_array_index] = sensor_reading_message.next_node_id;
 
 		// Send the message to the next node in the path.
-		printf("sending sensor values to mote %d \r\n",sensor_reading_message.path[1] );
+		printf("sending sensor values to mote %d \r\n",sensor_reading_message.next_node_id );
 		leds_on(LEDS_RED);
 		packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
-		linkaddr_t receiver_node = generateLinkAddress(sensor_reading_message.path[1]);
+		linkaddr_t receiver_node = generateLinkAddress(sensor_reading_message.next_node_id);
 		unicast_send(&unicastConn, &receiver_node);
 		leds_off(LEDS_RED);
-		timer_set(&ack_timer, 2*CLOCK_SECOND+ 0.1*random_rand()/RANDOM_RAND_MAX);
+		etimer_set(&ack_timer, 2*CLOCK_SECOND+ 0.1*random_rand()/RANDOM_RAND_MAX);
 
-		for(i=0 ; i<5 ; i++)
+		for(i=0;i<5;i++)
 		{
-			if (timer_expired(&ack_timer))
-					 {
-						 if(ack_received == 1)
-						 {
-							 printf("ack received\r\n");
+			PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&ack_timer));
+			 if(ack_received == 1)
+				{
+					printf("ack received\r\n");
+					break;
 
-							 continue;
+				}
 
-						 }
+			 else
+				{
 
-						 else
-						 {
+				 	 packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
+					 printf("resending packet \r\n") ;
+					 unicast_send(&unicastConn, &receiver_node);
+				}
 
-							 packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
-							 printf("resending packet \r\n") ;
-							 unicast_send(&unicastConn, &receiver_node);
-						 }
-
-					 }
-			timer_reset(&ack_timer);
+			etimer_reset(&ack_timer);
 
 		}
 
      // what to do if ACK is not received even after 5 attempts.
 
-		PROCESS_WAIT_EVENT_UNTIL(ev);
+		delay(10.0);
+
+
+		path_found = 0;
 
 	}
+
 	PROCESS_END();
+
 }
 
 /**
@@ -533,3 +540,24 @@ void sort_RSSI_table()
 	   }
 return;
  }
+
+
+void delay(float seconds)
+{
+	static struct timer delay_timer;
+	static int i;
+
+	timer_set(&delay_timer, seconds*CLOCK_SECOND);
+	printf("delay of %f seconds \r\n", seconds );
+
+	while(1)
+	{
+		if(timer_expired(&delay_timer))
+			break;
+	}
+	//PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&delay_timer));
+
+	//etimer_reset(&delay_timer);
+	 return;
+
+}
