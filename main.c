@@ -49,7 +49,7 @@
 
 #define UNICAST_RIME_CHANNEL 150
 #define BROADCAST_RIME_CHANNEL 130
-#define my_node_id 6
+#define my_node_id 2
 #define RANDOM_RAND_MAX 10
 //---------------- FUNCTION P1.ROTOTYPES ----------------
 
@@ -118,6 +118,8 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 			path_found = 1;
 			path_index = received_message.path_array_index;
 			received_message.path_array_index +=1;
+
+			//memcpy(path_array, received_message.path, sizeof(received_message.path));
 			for(i=0; i<6 ; i++)
 			{
 				path_array[i] = received_message.path[i] ;
@@ -158,19 +160,31 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	  			packetbuf_attr(PACKETBUF_ATTR_RSSI));
 	printf("the received message type  is %d \r\n",received_message.message_type);
 
-	if((received_message.message_type == sensor_value ) && (received_message.next_node_id == my_node_id))
+	if(received_message.message_type == sensor_value )
 	{
 
+		if(received_message.next_node_id == my_node_id)
+		{
 		received_message.next_node_id = received_message.path[received_message.path_array_index -1 ];
 		received_message.path_array_index -= 1;
 		//received_message.path[received_message.path_array_index] = received_message.next_node_id;
-
-
-
 		linkaddr_t next_node = generateLinkAddress(received_message.next_node_id);
 		packetbuf_copyfrom(&received_message, sizeof(received_message));
 		printf("message sent to  mote %d in the path.\r\n", received_message.next_node_id);
 		unicast_send(&unicastConn, &next_node);
+		}
+
+		else
+		{
+
+			received_message.path_array_index -= 1;
+			received_message.next_node_id = received_message.path_array_index;
+
+
+			packetbuf_copyfrom(&received_message, sizeof(received_message));
+			linkaddr_t next_node = generateLinkAddress(received_message.path[received_message.path_array_index]);
+			unicast_send(&unicastConn, &next_node);
+		}
 
 	}
 
@@ -196,7 +210,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 			}*/
 
 			received_message.path_array_index += 1;
-
+			received_message.next_node_id = received_message.path_array_index;
 
 
 			packetbuf_copyfrom(&received_message, sizeof(received_message));
@@ -280,8 +294,15 @@ PROCESS_THREAD(main_process, ev, data) {
 
 		//sort_RSSI_table();  // sort the RSSI table for calculating the path
 
+		//memcpy(sensor_reading_message.path, path_array, sizeof(path_array));
+		for(i=0; i<6 ; i++)
+					{
+						sensor_reading_message.path[i]= path_array[i] ;
+						printf("path array is %d and i=%d and path array index is %d\r\n", sensor_reading_message.path[i],i,path_index ) ;
+					}
 		sensor_reading_message.next_node_id = path_array[path_index -1 ];
 		sensor_reading_message.path_array_index = path_index -1;
+
 		//sensor_reading_message.path[0] = my_node_id;
 		//sensor_reading_message.path[sensor_reading_message.path_array_index] = sensor_reading_message.next_node_id;
 
@@ -292,7 +313,7 @@ PROCESS_THREAD(main_process, ev, data) {
 		linkaddr_t receiver_node = generateLinkAddress(sensor_reading_message.next_node_id);
 		unicast_send(&unicastConn, &receiver_node);
 		leds_off(LEDS_RED);
-		etimer_set(&ack_timer, 2*CLOCK_SECOND+ 0.1*random_rand()/RANDOM_RAND_MAX);
+		etimer_set(&ack_timer, 3*CLOCK_SECOND+ 0.1*random_rand()/RANDOM_RAND_MAX);
 
 		for(i=0;i<5;i++)
 		{
@@ -321,7 +342,7 @@ PROCESS_THREAD(main_process, ev, data) {
 		delay(10.0);
 
 
-		path_found = 0;
+		//path_found = 0;
 
 	}
 
