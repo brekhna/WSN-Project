@@ -119,7 +119,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 			for (i= 0; i<6 ; i++)
 			printf("The return path is %d \r\n", received_message.path[i]);
 
-		printf("unicast_mes received from node_%d\r\n", received_message.source_node_id);
+		printf("unicast_mes received from source node_%d\r\n", received_message.source_node_id);
 		ack_message.source_node_id = my_node_id;
 		ack_message.destination_node_id = received_message.source_node_id;
 		ack_message.message_type = ack ;
@@ -132,8 +132,9 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 				}
 		*/
 		packetbuf_copyfrom(&ack_message, sizeof(ack_message));
-		printf(" sending ack to the node id %d ", ack_message.destination_node_id);
+		printf(" sending ack to the destination node id %d \r\n", ack_message.destination_node_id);
 		linkaddr_t next_node = generateLinkAddress(ack_message.path[1]);
+		printf("Next node in the path is %d \r\n",next_node );
 		unicast_send(&unicastConn, &next_node);
 
 	}
@@ -197,7 +198,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 
 		//mote_state = active;
 		printf(" Gateway wakes up .\r\n\n");
-		printf(" *************************************************************************** \r\n\n");
+		printf(" ******************************************************************************* \r\n\n");
 		// broadcast the wakeup beacon
 		//wakeup_message.source_node_id = my_node_id;
 		//wakeup_message.msg_type = wakeup_beacon ;
@@ -281,6 +282,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 			*/
 			etimer_reset(&wakeup_timer);
 			printf(" Gateway goes to sleep.\r\n\n");
+			printf("************************************************************************************\r\n") ;
 	}
 	PROCESS_END();
 }
