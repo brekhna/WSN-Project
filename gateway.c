@@ -64,8 +64,8 @@ _Bool dummy_packet_broadcasted = 0;
 _Bool ack_received = 0;
 float RSSI_table[6];
 float sensor_value_table[6][4];
-struct message dummy_message;
-struct message received_message , ack_message;
+
+
 
 // Defines the behavior of a connection upon receiving data.
 static void
@@ -90,15 +90,17 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 {
 
 	int bytes = 0, i ;
+
+	struct message received_message , ack_message;
 	bytes = packetbuf_copyto(&received_message);
 
-	printf("` function called\n");
+	printf(" unicast_recv function called\n");
 	leds_on(LEDS_GREEN);
 	printf("Unicast message received from %d.%d: '%s' [RSSI %d]\r\n",
 	  			 from->u8[0], from->u8[1],
 	  			(char *)packetbuf_dataptr(),
 	  			packetbuf_attr(PACKETBUF_ATTR_RSSI));
-
+	 printf("the received message type is %d \r\n",received_message.message_type);
 
 	if((received_message.message_type == sensor_value ))
 	{
@@ -112,13 +114,14 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 
 
 
-		for( i=0; i<6; i++)
-		{
-			ack_message.path[i] = received_message.path[i] ;
-		}
-		printf("unicast_mes received from node_%d\r\n", ack_message.source_node_id);
+
+			memcpy(ack_message.path,received_message.path,sizeof(received_message.path));
+			for (i= 0; i<6 ; i++)
+			printf("The return path is %d \r\n", received_message.path[i]);
+
+		printf("unicast_mes received from node_%d\r\n", received_message.source_node_id);
 		ack_message.source_node_id = my_node_id;
-		ack_message.destination_node_id = ack_message.source_node_id;
+		ack_message.destination_node_id = received_message.source_node_id;
 		ack_message.message_type = ack ;
 
 		/*
@@ -129,6 +132,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 				}
 		*/
 		packetbuf_copyfrom(&ack_message, sizeof(ack_message));
+		printf(" sending ack to the node id %d ", ack_message.destination_node_id);
 		linkaddr_t next_node = generateLinkAddress(ack_message.path[1]);
 		unicast_send(&unicastConn, &next_node);
 
@@ -177,6 +181,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 	// set timers
 	static struct etimer wakeup_timer , dummy_packet_timer, sensor_table_check_timer;
 	static struct timer ack_timer, wakeup_rept_timer;
+	struct message dummy_message;
 
 
 	// set variables
@@ -192,6 +197,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 
 		//mote_state = active;
 		printf(" Gateway wakes up .\r\n\n");
+		printf(" *************************************************************************** \r\n\n");
 		// broadcast the wakeup beacon
 		//wakeup_message.source_node_id = my_node_id;
 		//wakeup_message.msg_type = wakeup_beacon ;
@@ -215,7 +221,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 				{
 					// Broadcast the dummy packet for 5 times (random interval)
 					etimer_set(&dummy_packet_timer, CLOCK_SECOND/200 + 0.1*random_rand()/RANDOM_RAND_MAX);
-					for(i=0; i<=1; i++)
+					for(i=0; i<=0; i++)
 					{
 						PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&dummy_packet_timer));
 
@@ -274,6 +280,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 
 			*/
 			etimer_reset(&wakeup_timer);
+			printf(" Gateway goes to sleep.\r\n\n");
 	}
 	PROCESS_END();
 }
