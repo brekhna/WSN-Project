@@ -49,7 +49,7 @@
 
 #define UNICAST_RIME_CHANNEL 150
 #define BROADCAST_RIME_CHANNEL 130
-#define my_node_id 2
+#define my_node_id 5
 #define RANDOM_RAND_MAX 10
 //---------------- FUNCTION P1.ROTOTYPES ----------------
 
@@ -108,7 +108,7 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 
 	if ((received_message.message_type == dummy_packet ))
 	{
-		printf("The mote is active and dummy packet is received from other motes. Now fill up the RSSI table\r\n");
+		printf("The mote is active and dummy packet is received from other motes.\r\n");
 		//RSSI_table[1][received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
 		//RSSI_table[1][my_node_id] = -91;
 
@@ -215,6 +215,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 
 			packetbuf_copyfrom(&received_message, sizeof(received_message));
 			linkaddr_t next_node = generateLinkAddress(received_message.path[received_message.path_array_index]);
+			printf("Ack received , but not for this node. Forwarding ACK message to node %d \r\n", next_node);
 			unicast_send(&unicastConn, &next_node);
 		}
 	}
@@ -274,6 +275,7 @@ PROCESS_THREAD(main_process, ev, data) {
 	{
 		// Contiki processes cannot start loops that never end.
 		printf("mote started \r\n");
+		printf("********************************************************************* \r\n ");
 
 		PROCESS_WAIT_EVENT_UNTIL(ev);
 
@@ -320,7 +322,7 @@ PROCESS_THREAD(main_process, ev, data) {
 			PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&ack_timer));
 			 if(ack_received == 1)
 				{
-					printf("ack received\r\n");
+					printf(" ACK received. No need to resend now. \r\n");
 					break;
 
 				}
@@ -329,7 +331,7 @@ PROCESS_THREAD(main_process, ev, data) {
 				{
 
 				 	 packetbuf_copyfrom(&sensor_reading_message, sizeof(sensor_reading_message));
-					 printf("resending packet \r\n") ;
+					 printf(" ACK not received . so, resending packet \r\n") ;
 					 unicast_send(&unicastConn, &receiver_node);
 				}
 
@@ -337,6 +339,13 @@ PROCESS_THREAD(main_process, ev, data) {
 
 		}
 
+
+		if(ack_received == 1)
+		{
+			etimer_set(&wait_timer, 10*CLOCK_SECOND);
+			PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&wait_timer));
+
+		}
      // what to do if ACK is not received even after 5 attempts.
 
 		delay(10.0);
