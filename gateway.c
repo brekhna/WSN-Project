@@ -89,7 +89,7 @@ static void
 unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 {
 
-	int bytes = 0, i ;
+	static int bytes = 0, i ;
 
 	struct message received_message , ack_message;
 	bytes = packetbuf_copyto(&received_message);
