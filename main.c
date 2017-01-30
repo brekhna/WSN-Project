@@ -91,7 +91,7 @@ AUTOSTART_PROCESSES(&main_process);
 static void
 broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 {
-	int bytes = 0;
+	static int bytes = 0;
 	static int i ;
 
 	bytes = packetbuf_copyto(&received_message);
@@ -112,7 +112,7 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 		//RSSI_table[1][received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
 		//RSSI_table[1][my_node_id] = -91;
 
-		if((packetbuf_attr(PACKETBUF_ATTR_RSSI) > -70) && (path_found == 0))
+		if((packetbuf_attr(PACKETBUF_ATTR_RSSI) > -90) && (path_found == 0))
 		{
 			received_message.path[received_message.path_array_index] = my_node_id;
 			path_found = 1;
@@ -146,7 +146,7 @@ static void
 unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 {
 
-	int bytes = 0, i ;
+	static int bytes = 0, i ;
 	//struct message received_message;
 	bytes = packetbuf_copyto(&received_message);
 
