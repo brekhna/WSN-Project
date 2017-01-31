@@ -112,7 +112,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 		sensor_value_table[received_message.source_node_id][2] = received_message.light_sensor_reading;
 		sensor_value_table[received_message.source_node_id][3] = received_message.humidity_sensor_reading;
 
-
+        printf(" The temperature value is %f \r\n",sensor_value_table[received_message.source_node_id][1] );
 
 
 			memcpy(ack_message.path,received_message.path,sizeof(received_message.path));
@@ -131,6 +131,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 					continue;
 				}
 		*/
+
 		packetbuf_copyfrom(&ack_message, sizeof(ack_message));
 		printf(" sending ack to the destination node id %d \r\n", ack_message.destination_node_id);
 		linkaddr_t next_node = generateLinkAddress(ack_message.path[1]);
@@ -168,7 +169,7 @@ PROCESS_THREAD(gateway_process, ev, data) {
 	PROCESS_BEGIN();
 	// Configure your team's channel (11 - 26).
 	cc2420_set_channel(13);
-	cc2420_set_txpower(31);  // power must be in the range 0..31
+	cc2420_set_txpower(11);  // power must be in the range 0..31
 	// Set and load the node ID to generate a RIME address:
 	node_id_burn(my_node_id);
 	node_id_restore();
