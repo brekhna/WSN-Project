@@ -49,7 +49,7 @@
 
 #define UNICAST_RIME_CHANNEL 150
 #define BROADCAST_RIME_CHANNEL 130
-#define my_node_id 5
+#define my_node_id 6
 #define RANDOM_RAND_MAX 10
 //---------------- FUNCTION P1.ROTOTYPES ----------------
 
@@ -71,16 +71,20 @@ _Bool wakeup_beacon_rebroadcasted = 0;
  _Bool dummy_packet_broadcasted = 0;
  _Bool ack_received = 0;
  _Bool path_found = 0;
+
  float RSSI_table[2][6]= {{0,1,2,3,4,5},
 						  {0,0,0,0,0,0}};
 float sorted_RSSI_table[2][6] = {{0,1,2,3,4,5},
 		  	  	  	  	  	  	  {0,0,0,0,0,0}};
+
 float sensor_value_table[6][4];
 int path_array[6]= {0,0,0,0,0,0};
 int path_index;
 
 
 static linkaddr_t generateLinkAddress(uint8_t nodeId);
+
+void clock_delay_usec(uint16_t dt);
 
 //--------------------- PROCESS CONTROL BLOCK ---------------------generateLinkAddress
 PROCESS(main_process, "Main process");
@@ -93,6 +97,7 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 {
 	static int bytes = 0;
 	static int i ;
+	int highest=0;
 
 	bytes = packetbuf_copyto(&received_message);
 	void* data ;
@@ -112,7 +117,7 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 		//RSSI_table[1][received_message.source_node_id] = packetbuf_attr(PACKETBUF_ATTR_RSSI);
 		//RSSI_table[1][my_node_id] = -91;
 
-		if((packetbuf_attr(PACKETBUF_ATTR_RSSI) > -90) && (path_found == 0))
+		if((packetbuf_attr(PACKETBUF_ATTR_RSSI) > -80) && (path_found == 0))
 		{
 			received_message.path[received_message.path_array_index] = my_node_id;
 			path_found = 1;
@@ -131,6 +136,9 @@ broadcast_recv(struct broadcast_conn *c, const linkaddr_t *from)
 			process_post(&main_process, 'event',data); // post an event to main_process
 
 		}
+		//if(packetbuf_attr(PACKETBUF_ATTR_RSSI)>highest)
+		//highest=packetbuf_attr(PACKETBUF_ATTR_RSSI);
+
 
 	}
 
@@ -147,6 +155,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 {
 
 	static int bytes = 0, i ;
+	static double delay_time;
 	//struct message received_message;
 	bytes = packetbuf_copyto(&received_message);
 
@@ -158,10 +167,12 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 	  			 from->u8[0], from->u8[1],
 	  			(char *)packetbuf_dataptr(),
 	  			packetbuf_attr(PACKETBUF_ATTR_RSSI));
-	printf("the received message type  is %d \r\n",received_message.message_type);
+
 
 	if(received_message.message_type == sensor_value )
 	{
+
+		printf("the received message type  is sensor value \r\n");
 
 		if(received_message.next_node_id == my_node_id)
 		{
@@ -169,6 +180,10 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 		received_message.path_array_index -= 1;
 		//received_message.path[received_message.path_array_index] = received_message.next_node_id;
 		linkaddr_t next_node = generateLinkAddress(received_message.next_node_id);
+
+		//clock_wait(3000 + 1000*(random_rand() % RANDOM_RAND_MAX));
+		//printf("The delay is %f \r\n", delay_time);
+
 		packetbuf_copyfrom(&received_message, sizeof(received_message));
 		printf("message sent to  mote %d in the path.\r\n", received_message.next_node_id);
 		unicast_send(&unicastConn, &next_node);
@@ -190,6 +205,7 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 
 	else if((received_message.message_type == ack ))
 	{
+		printf("the received message type  is ACK \r\n");
 
 		if(received_message.destination_node_id == my_node_id ) // Ack received for the sent data
 		{
@@ -210,12 +226,13 @@ unicast_recv(struct unicast_conn *c, const linkaddr_t *from)
 			}*/
 
 			received_message.path_array_index += 1;
-			received_message.next_node_id = received_message.path_array_index;
+			received_message.next_node_id = received_message.path[received_message.path_array_index];
 
+			//clock_wait(3000 + 1000*(random_rand() % RANDOM_RAND_MAX));
 
 			packetbuf_copyfrom(&received_message, sizeof(received_message));
-			linkaddr_t next_node = generateLinkAddress(received_message.path[received_message.path_array_index]);
-			printf("Ack received , but not for this node. Forwarding ACK message to node %d \r\n", next_node);
+			linkaddr_t next_node = generateLinkAddress(received_message.path[received_message.next_node_id ]);
+			printf("Ack received for node %d, but not for this node. Forwarding ACK message to node %d \r\n", received_message.destination_node_id, next_node);
 			unicast_send(&unicastConn, &next_node);
 		}
 	}
@@ -239,7 +256,7 @@ _Bool  getLightValue(float m, float b, uint8_t phidget_input);
 float getHumidityValue(uint8_t phidget_input);
 int get_next_node_id(struct message sensor_message);
 void sort_RSSI_table(void);
-void delay (float seconds);
+void delay(double seconds);
 
 
 
@@ -249,7 +266,7 @@ PROCESS_THREAD(main_process, ev, data) {
 	PROCESS_BEGIN();
 	// Configure your team's channel (11 -26).
 	cc2420_set_channel(13);
-	cc2420_set_txpower(31);
+	cc2420_set_txpower(11);
 	// Set and load the node ID to generate a RIME address:
 	node_id_burn(my_node_id);
 	node_id_restore();
@@ -261,12 +278,12 @@ PROCESS_THREAD(main_process, ev, data) {
 
 
 	// set timers
-	static struct etimer dummy_packet_timer, ack_timer, wait_timer;
+	static struct etimer dummy_packet_timer, ack_timer, wait_timer, send_delay;
 
 
 
 	// set variables
-	//struct message dummy_message, sensor_reading_message;
+	//struct mdelayessage dummy_message, sensor_reading_message;
 	struct sensor_readings sensor_data;
 	static int i;
 
@@ -308,6 +325,10 @@ PROCESS_THREAD(main_process, ev, data) {
 		//sensor_reading_message.path[0] = my_node_id;
 		//sensor_reading_message.path[sensor_reading_message.path_array_index] = sensor_reading_message.next_node_id;
 
+		etimer_set(&send_delay, CLOCK_SECOND/3+ 0.01*(random_rand() % RANDOM_RAND_MAX));
+		PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&send_delay));
+
+
 		// Send the message to the next node in the path.
 		printf("sending sensor values to mote %d \r\n",sensor_reading_message.next_node_id );
 		leds_on(LEDS_RED);
@@ -315,16 +336,16 @@ PROCESS_THREAD(main_process, ev, data) {
 		linkaddr_t receiver_node = generateLinkAddress(sensor_reading_message.next_node_id);
 		unicast_send(&unicastConn, &receiver_node);
 		leds_off(LEDS_RED);
-		etimer_set(&ack_timer, 3*CLOCK_SECOND+ 0.1*random_rand()/RANDOM_RAND_MAX);
+		etimer_set(&ack_timer, 3*CLOCK_SECOND+ 0.01*(random_rand()% RANDOM_RAND_MAX));
 
 		for(i=0;i<5;i++)
 		{
 			PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&ack_timer));
-			 if(ack_received == 1)
+			 if( ack_received==1)
 				{
 					printf(" ACK received. No need to resend now. \r\n");
 					break;
-
+					ack_received=0;
 				}
 
 			 else
@@ -340,16 +361,13 @@ PROCESS_THREAD(main_process, ev, data) {
 		}
 
 
-		if(ack_received == 1)
+		if( ack_received==1)
 		{
 			etimer_set(&wait_timer, 10*CLOCK_SECOND);
 			PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&wait_timer));
 
 		}
      // what to do if ACK is not received even after 5 attempts.
-
-		delay(10.0);
-
 
 		//path_found = 0;
 
@@ -368,7 +386,7 @@ static void print_buffer_contents(void){
 	/*
 	 * get the buffered message and message size
 	 */
-	rxBytes = packetbuf_copyto(&rxBuffer);
+	rxBytes = pacdelayketbuf_copyto(&rxBuffer);
 	if (rxBytes>0) {
 		printf("%s\r\n\n",rxBuffer);
 	}
@@ -381,7 +399,7 @@ static void check_for_invalid_addr(void) {
 	static linkaddr_t errAddr;
 	errAddr.u8[0] = 0;
 	errAddr.u8[1] = 0;
-	// Check if this mote got an invalid address.
+	// Check if this mote got an invalid addressdelay.
 	iAmError = linkaddr_cmp(&errAddr, &linkaddr_node_addr);
 	// Turn ON all LEDs if we loaded an invalid address.
 	if(iAmError){
@@ -424,7 +442,7 @@ static linkaddr_t generateLinkAddress(uint8_t nodeId){
 
 struct sensor_readings get_sensors_value()
 {
- struct sensor_readings sensor_data;
+ struct sensor_readings  sensor_data;
 
  SENSORS_ACTIVATE(phidgets);  // activate the sensors
 
@@ -477,7 +495,7 @@ struct sensor_readings get_sensors_value()
 	float SensorValue;
 	int lux;
 	_Bool light = 0;
-	//SENSORS_ACTIVATE(phidgets);
+	//SENSORS_ACTIVATE(phiseconds dgets);
 	voltage=phidgets.value(phidget_input);
 	//Convert the voltage in lux with the provided formula
 	SensorValue = voltage/4.096;
@@ -572,22 +590,25 @@ return;
  }
 
 
-void delay(float seconds)
+void delay(double seconds)
 {
 	static struct timer delay_timer;
-	static int i;
+	//static int i;
 
-	timer_set(&delay_timer, seconds*CLOCK_SECOND);
+	stimer_set(&delay_timer, seconds*CLOCK_SECOND);
 	printf("delay of %f seconds \r\n", seconds );
 
 	while(1)
 	{
-		if(timer_expired(&delay_timer))
+		if(stimer_expired(&delay_timer))
 			break;
 	}
 	//PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&delay_timer));
 
 	//etimer_reset(&delay_timer);
-	 return;
+	 return ;
 
 }
+
+
+void clock_delay(unsigned int delay);
